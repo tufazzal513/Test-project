@@ -1,0 +1,127 @@
+name: Build MoveX production backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/build-backend.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: movex-backend-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-linux-amd64:
+    name: Test and package Linux amd64 binary
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+          cache-dependency-path: backend/go.mod
+
+      - name: Resolve and verify Go modules
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          go mod tidy
+          go mod verify
+
+      - name: Run production test suite
+        working-directory: backend
+        run: go test -count=1 ./...
+
+      - name: Build production Linux binary
+        working-directory: backend
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          go build \
+            -trimpath \
+            -buildvcs=false \
+            -ldflags='-s -w' \
+            -o dist/movex \
+            ./cmd/movex
+          chmod 0755 dist/movex
+          ./dist/movex version
+          file dist/movex
+
+      - name: Assemble deployment package
+        working-directory: backend
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          PACKAGE_DIR="$RUNNER_TEMP/movex-linux-amd64"
+          mkdir -p "$PACKAGE_DIR"
+          install -m 0755 dist/movex "$PACKAGE_DIR/movex"
+          install -m 0755 deploy/start.sh "$PACKAGE_DIR/start.sh"
+          cat > "$PACKAGE_DIR/BUILD-INFO.txt" <<INFO
+          Project: MOVEX
+          Target: linux/amd64
+          Go version: $(go version)
+          Git commit: ${SOURCE_SHA}
+          Git ref: ${SOURCE_REF}
+          Built at (UTC): $(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          CGO_ENABLED: 0
+          INFO
+          cat > "$PACKAGE_DIR/README.txt" <<'DOC'
+          MOVEX production backend package (Linux amd64)
+
+          Files:
+            movex       Production Go backend executable
+            start.sh    Starts the backend using the host-provided PORT
+            BUILD-INFO  Build provenance
+            SHA256SUMS  Integrity checksum for the executable
+
+          Run:
+            chmod +x movex start.sh
+            ./start.sh
+
+          Required runtime configuration is supplied through environment
+          variables in the hosting dashboard. Do not upload .env or secrets.
+          Set DATA_DIR to a persistent writable directory. Keep that directory
+          across restarts and deployments because it contains movex.db,
+          session.key, Telegram session data, and backup files.
+
+          This package targets Linux x86_64 (amd64). It will not run on ARM64
+          hosts. Confirm the host architecture and startup contract first.
+          DOC
+          (
+            cd "$PACKAGE_DIR"
+            sha256sum movex > SHA256SUMS
+          )
+          mkdir -p dist/release
+          tar -C "$RUNNER_TEMP" -czf dist/release/movex-linux-amd64.tar.gz movex-linux-amd64
+          (cd "$RUNNER_TEMP" && zip -qr "$GITHUB_WORKSPACE/backend/dist/release/movex-linux-amd64.zip" movex-linux-amd64)
+          cp "$PACKAGE_DIR/BUILD-INFO.txt" dist/release/
+          cp "$PACKAGE_DIR/SHA256SUMS" dist/release/
+          ls -lh dist/release
+
+      - name: Upload downloadable build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: movex-linux-amd64-${{ github.sha }}
+          path: |
+            backend/dist/release/movex-linux-amd64.tar.gz
+            backend/dist/release/movex-linux-amd64.zip
+            backend/dist/release/BUILD-INFO.txt
+            backend/dist/release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
