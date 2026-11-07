@@ -120,7 +120,7 @@ func sameOrigin(r *http.Request, trustProxy bool) bool {
 			if forwardedHost := r.Header.Get("X-Forwarded-Host"); forwardedHost != "" {
 				// Accept exactly one authority from the trusted proxy. Never use
 				// a comma-separated client-supplied chain for security decisions.
-				if strings.ContainsAny(forwardedHost, ",\\r\\n\\t /\\\\") {
+				if strings.ContainsAny(forwardedHost, ",\r\n\t /\\") {
 					return false
 				}
 				fh, err := url.Parse("//" + forwardedHost)
