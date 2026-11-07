@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -104,30 +105,42 @@ func serve() error {
 			return fmt.Errorf("pending database restore: %w", restoreErr)
 		}
 		if !pendingApplied && cfg.TelegramConfigured() {
-			empty, emptyErr := backup.IsDatabaseFileEmpty(ctx, cfg.DBPath())
-			if emptyErr != nil {
-				return fmt.Errorf("check database before Telegram first-boot restore: %w", emptyErr)
-			}
-			if empty {
-				tgClient, tgErr := telegrammtproto.New(telegrammtproto.Config{
-					APIID: cfg.TGAPIID, APIHash: cfg.TGAPIHash, ChatID: cfg.TGChatID,
-					SessionPath: cfg.TelegramSession(),
-				})
-				if tgErr != nil {
-					return fmt.Errorf("initialize Telegram restore client: %w", tgErr)
+			// A fresh installation has no authorized Telegram MTProto session yet.
+			// Do not attempt remote discovery before the admin completes Telegram
+			// login from the panel. The login flow creates this file; subsequent
+			// restarts can then discover and restore a backup when the DB is empty.
+			_, sessionErr := os.Lstat(cfg.TelegramSession())
+			switch {
+			case errors.Is(sessionErr, os.ErrNotExist):
+				log.Info("skipping first-boot Telegram restore: no Telegram session exists; complete Telegram login from the admin panel")
+			case sessionErr != nil:
+				return fmt.Errorf("check Telegram session before first-boot restore: %w", sessionErr)
+			default:
+				empty, emptyErr := backup.IsDatabaseFileEmpty(ctx, cfg.DBPath())
+				if emptyErr != nil {
+					return fmt.Errorf("check database before Telegram first-boot restore: %w", emptyErr)
 				}
-				remote, remoteErr := backup.RestoreLatestFromTelegram(ctx, tgClient, backup.RestoreOptions{
-					DBPath: cfg.DBPath(), TempDir: cfg.DataDir, CurrentSchema: 4,
-					RequiredTables: []string{"schema_migrations", "meta", "movies", "users", "workers"},
-					OpenSnapshot:   func(ctx context.Context, path string) (*sql.DB, error) { return db.Open(ctx, path) },
-					IsDatabaseEmpty: func(checkCtx context.Context) (bool, error) {
-						return backup.IsDatabaseFileEmpty(checkCtx, cfg.DBPath())
-					},
-				})
-				if remoteErr != nil {
-					return fmt.Errorf("automatic Telegram database restore: %w", remoteErr)
+				if empty {
+					tgClient, tgErr := telegrammtproto.New(telegrammtproto.Config{
+						APIID: cfg.TGAPIID, APIHash: cfg.TGAPIHash, ChatID: cfg.TGChatID,
+						SessionPath: cfg.TelegramSession(),
+					})
+					if tgErr != nil {
+						return fmt.Errorf("initialize Telegram restore client: %w", tgErr)
+					}
+					remote, remoteErr := backup.RestoreLatestFromTelegram(ctx, tgClient, backup.RestoreOptions{
+						DBPath: cfg.DBPath(), TempDir: cfg.DataDir, CurrentSchema: 4,
+						RequiredTables: []string{"schema_migrations", "meta", "movies", "users", "workers"},
+						OpenSnapshot:   func(ctx context.Context, path string) (*sql.DB, error) { return db.Open(ctx, path) },
+						IsDatabaseEmpty: func(checkCtx context.Context) (bool, error) {
+							return backup.IsDatabaseFileEmpty(checkCtx, cfg.DBPath())
+						},
+					})
+					if remoteErr != nil {
+						return fmt.Errorf("automatic Telegram database restore: %w", remoteErr)
+					}
+					log.Info("database restored from Telegram backup", "message_id", remote.MessageID, "file", remote.Filename, "backup_at", remote.Metadata.At)
 				}
-				log.Info("database restored from Telegram backup", "message_id", remote.MessageID, "file", remote.Filename, "backup_at", remote.Metadata.At)
 			}
 		}
 	}
