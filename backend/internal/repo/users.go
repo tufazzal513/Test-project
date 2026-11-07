@@ -374,7 +374,7 @@ type Progress struct {
 const maxProgressRows = 300
 
 func (r *Repo) GetProgress(ctx context.Context, uid string) ([]Progress, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT movie_id, COALESCE(season, ''), ep, t, d, updated_at FROM watch_progress WHERE uid = ? ORDER BY updated_at DESC, movie_id DESC`, uid)
+	rows, err := r.db.QueryContext(ctx, `SELECT movie_id, COALESCE(season, ''), ep, t, d, updated_at FROM watch_progress WHERE uid = ? ORDER BY updated_at DESC`, uid)
 	if err != nil {
 		return nil, err
 	}
@@ -417,9 +417,20 @@ func (r *Repo) SetProgress(ctx context.Context, uid, movieID, season string, ep 
 		if err := r.mustExist(ctx, tx, movieID); err != nil {
 			return err
 		}
+		// Millisecond wall-clock timestamps can tie during rapid updates. Keep
+		// this user's logical update order strictly increasing so recent-progress
+		// ordering and bounded pruning never depend on random movie IDs.
+		now := r.nowMs()
+		var latest int64
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(updated_at), 0) FROM watch_progress WHERE uid = ?`, uid).Scan(&latest); err != nil {
+			return err
+		}
+		if now <= latest {
+			now = latest + 1
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO watch_progress(uid, movie_id, season, ep, t, d, updated_at) VALUES (?,?,?,?,?,?,?)
 			ON CONFLICT(uid, movie_id) DO UPDATE SET season = excluded.season, ep = excluded.ep, t = excluded.t, d = excluded.d, updated_at = excluded.updated_at`,
-			uid, movieID, nullStr(season), ep, t, d, r.nowMs()); err != nil {
+			uid, movieID, nullStr(season), ep, t, d, now); err != nil {
 			return err
 		}
 		// keep the table bounded: only the most recent titles stay
