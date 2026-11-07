@@ -52,6 +52,16 @@ func (a *Admin) loginPage(w http.ResponseWriter, r *http.Request) {
 func (a *Admin) loginSubmit(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, loginBodyLimit)
 	if !sameOrigin(r, a.deps.Cfg.TrustProxy) {
+		// Log only bounded request-routing headers needed to diagnose trusted-proxy
+		// deployments. Never log form values, cookies, authorization, or tokens.
+		a.deps.Log.Warn("admin login: same-origin check failed",
+			"id", httpx.RequestID(r),
+			"host", boundedHeader(r.Host),
+			"origin", boundedHeader(r.Header.Get("Origin")),
+			"forwarded_host", boundedHeader(r.Header.Get("X-Forwarded-Host")),
+			"sec_fetch_site", boundedHeader(r.Header.Get("Sec-Fetch-Site")),
+			"trust_proxy", a.deps.Cfg.TrustProxy,
+		)
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -142,6 +152,20 @@ var (
 	errSignInUnavailable = errors.New("sign-in unavailable")
 	errSignInRejected    = errors.New("sign-in rejected")
 )
+
+// boundedHeader keeps diagnostic request metadata small and single-line.
+func boundedHeader(value string) string {
+	value = strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' || r == '\t' {
+			return ' '
+		}
+		return r
+	}, value)
+	if len(value) > 200 {
+		value = value[:200]
+	}
+	return value
+}
 
 // firebaseSignIn checks the email and password with Firebase (accounts:signInWithPassword).
 func (a *Admin) firebaseSignIn(ctx context.Context, email, password string) (idToken, localID string, err error) {
