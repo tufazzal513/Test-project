@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"movex/internal/config"
 	"movex/internal/repo"
 )
 
