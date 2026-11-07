@@ -1044,3 +1044,30 @@ Next:
 - Added regression tests for trusted proxy host matching, disabled proxy trust, ambiguous forwarded hosts, and cross-site fetch rejection.
 - Botkeep deployment must set `TRUST_PROXY=1` only because its platform router is the trusted reverse proxy.
 - GitHub Actions remains the authoritative full test/build check; local full Go tests could not run in this environment because Go module downloads are unavailable.
+
+
+## Part 38 - Deep audit phase 1 and null-Origin CSRF fallback (2026-11-07)
+
+Implemented:
+- Re-audited the uploaded source ZIP instead of treating the prior Part 37 report as a complete project audit.
+- Updated admin `sameOrigin` handling: `Origin: null` is accepted only when Fetch Metadata explicitly says `same-origin` and a valid Referer authority matches the expected host (trusted `X-Forwarded-Host` when proxy trust is enabled). Missing, malformed, foreign, or ambiguous values are rejected.
+- Kept login/session CSRF token checks mandatory. No blanket Origin bypass was introduced.
+- Added regression tests for null-Origin same-host Referer acceptance and missing/foreign/cross-site/malformed Referer rejection.
+- Changed admin `Referrer-Policy` from `no-referrer` to `same-origin`; without this, the browser would suppress the Referer required by the strict fallback. Cross-origin Referer disclosure remains disabled.
+- Added a regression test for the admin Referrer-Policy.
+- Added privacy-safe `referer_origin` to the login diagnostic log. Only scheme + authority are logged; path and query are excluded.
+- Added `docs/AUDIT_PHASE1_2026-11-07.md` with the actual scope, results, limitations, and next audit areas.
+
+Validation:
+- Frontend Node tests: 21/21 PASS.
+- Frontend JavaScript syntax checks: PASS.
+- Frontend local HTML asset reference check: 0 missing local references.
+- `go test -tags nodriver` and `go vet -tags nodriver` passed for 11 backend internal packages (admin, auth, backup, config, db, httpx, presence, replica, repo, server, taxonomy).
+
+Blocked / not verified:
+- Full production `go test ./...`, `internal/telegrammtproto`, and `cmd/movex` build remain blocked because Go module downloads are unavailable in this environment and the archive does not contain `go.sum`.
+- `nodriver` intentionally excludes the production SQLite driver and some integration tests.
+- Live Botkeep login, Firebase, Telegram OTP/2FA/backup/restore, browser E2E, and main-worker integration remain unverified.
+
+Next:
+- Continue the A-to-Z audit by checking every admin form/action against its handler and audit event, then review API authorization/error handling, DB migration/restore safety, Telegram lifecycle, replication recovery, and deployment configuration. Do not mark any live integration complete until it is actually tested.
