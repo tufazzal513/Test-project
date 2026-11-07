@@ -88,8 +88,12 @@ func (r *Repo) ReplicationBatch(ctx context.Context, epoch string, since int64, 
 	missingTail := maxSeq > 0 && (!actualMaxSeq.Valid || actualMaxSeq.Int64 < maxSeq)
 	// A cursor ahead of the main, a pruned prefix, or a missing tail all require
 	// a full snapshot instead of an empty/incomplete incremental response.
-	full := epoch != currentEpoch || since > maxSeq || missingTail ||
-		(minSeq.Valid && since < minSeq.Int64-1) || (!minSeq.Valid && since < maxSeq)
+	// A brand-new worker with no cursor asks for the retained change stream.
+	// Explicit stale epochs and non-zero cursors still require a full snapshot
+	// whenever the requested history is unavailable.
+	initial := epoch == "" && since == 0
+	full := !initial && (epoch != currentEpoch || since > maxSeq || missingTail ||
+		(minSeq.Valid && since < minSeq.Int64-1) || (!minSeq.Valid && since < maxSeq))
 	out := &ReplicationBatch{Epoch: currentEpoch, MaxSeq: maxSeq, Full: full}
 	if full {
 		snap, e := r.replicationSnapshot(ctx)
