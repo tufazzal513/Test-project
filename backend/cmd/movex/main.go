@@ -167,7 +167,7 @@ func serve() error {
 				return fmt.Errorf("initialize Telegram login flow: %w", err)
 			}
 		}
-		backupManager, err = backup.New(backup.Options{DB: database, DBPath: cfg.DBPath(), Dir: cfg.DataDir + "/backups", Keep: cfg.TGKeep, SchemaVersion: 4, Telegram: telegramClient, Logger: slog.Default()})
+		backupManager, err = backup.New(backup.Options{DB: database, DBPath: cfg.DBPath(), Dir: cfg.DataDir + "/backups", Keep: cfg.TGKeep, SchemaVersion: 4, Telegram: telegramClient, Logger: slog.NewLogLogger(log.Handler(), slog.LevelInfo)})
 		if err != nil {
 			return fmt.Errorf("initialize backup manager: %w", err)
 		}
