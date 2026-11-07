@@ -104,13 +104,33 @@ func safeNext(next string) string {
 }
 
 // sameOrigin is the first CSRF layer: browsers tell us where a request came from.
-func sameOrigin(r *http.Request) bool {
+// When running behind an explicitly trusted reverse proxy, compare Origin with
+// the public host forwarded by that proxy instead of the private upstream Host.
+func sameOrigin(r *http.Request, trustProxy bool) bool {
 	if sfs := r.Header.Get("Sec-Fetch-Site"); sfs != "" && sfs != "same-origin" {
 		return false
 	}
 	if o := r.Header.Get("Origin"); o != "" {
 		u, err := url.Parse(o)
-		if err != nil || u.Host != r.Host {
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+			return false
+		}
+		expectedHost := r.Host
+		if trustProxy {
+			if forwardedHost := r.Header.Get("X-Forwarded-Host"); forwardedHost != "" {
+				// Accept exactly one authority from the trusted proxy. Never use
+				// a comma-separated client-supplied chain for security decisions.
+				if strings.ContainsAny(forwardedHost, ",\\r\\n\\t /\\\\") {
+					return false
+				}
+				fh, err := url.Parse("//" + forwardedHost)
+				if err != nil || fh.Host == "" || fh.User != nil || fh.Path != "" {
+					return false
+				}
+				expectedHost = fh.Host
+			}
+		}
+		if !strings.EqualFold(u.Host, expectedHost) {
 			return false
 		}
 	}
@@ -137,7 +157,7 @@ func (a *Admin) requireAdmin(fn func(*Ctx)) http.Handler {
 				limit = 512 << 20
 			}
 			r.Body = http.MaxBytesReader(w, r.Body, limit)
-			if !sameOrigin(r) || !a.csrfOK(r, sess) {
+			if !sameOrigin(r, a.deps.Cfg.TrustProxy) || !a.csrfOK(r, sess) {
 				a.deps.Log.Warn("admin: CSRF check failed", "id", httpx.RequestID(r), "method", r.Method, "path", r.URL.Path, "uid", sess.UID)
 				c := &Ctx{W: w, R: r, Admin: a, Session: sess}
 				c.Error(http.StatusForbidden, "Security check failed. Reload the page and try again.")

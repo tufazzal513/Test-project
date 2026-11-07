@@ -1036,3 +1036,11 @@ Next:
 - Existing authorized sessions still use the guarded empty-database Telegram restore path. Unexpected session filesystem errors remain fatal.
 - Admin must complete Telegram phone/code/2FA login from the admin panel; the login flow persists the session for later backup/restore operations.
 - Validation: source inspection and formatting checked; run the GitHub Actions production test/build workflow after pushing. Live Telegram login and Botkeep startup remain deployment checks.
+
+
+## Part 36: Admin login behind reverse proxy
+- Fixed the admin login/logout and authenticated admin CSRF origin check to compare the browser Origin host against `X-Forwarded-Host` when `TRUST_PROXY=1`.
+- The forwarded host is accepted only as one unambiguous authority; comma-separated or malformed values are rejected.
+- Added regression tests for trusted proxy host matching, disabled proxy trust, ambiguous forwarded hosts, and cross-site fetch rejection.
+- Botkeep deployment must set `TRUST_PROXY=1` only because its platform router is the trusted reverse proxy.
+- GitHub Actions remains the authoritative full test/build check; local full Go tests could not run in this environment because Go module downloads are unavailable.
