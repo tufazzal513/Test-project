@@ -24,7 +24,11 @@ func TestInternalSyncRequiresWorkerKeyAndReturnsCurrentAggregate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest("GET", "/internal/sync?since=0&limit=50", nil)
+	currentEpoch, err := f.r.EnsureEpoch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("GET", "/internal/sync?epoch="+currentEpoch+"&since=0&limit=50", nil)
 	req.Header.Set("X-Worker-Key", key)
 	rr := httptest.NewRecorder()
 	f.s.Handler().ServeHTTP(rr, req)
