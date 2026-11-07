@@ -374,7 +374,7 @@ type Progress struct {
 const maxProgressRows = 300
 
 func (r *Repo) GetProgress(ctx context.Context, uid string) ([]Progress, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT movie_id, COALESCE(season, ''), ep, t, d, updated_at FROM watch_progress WHERE uid = ? ORDER BY updated_at DESC, rowid DESC`, uid)
+	rows, err := r.db.QueryContext(ctx, `SELECT movie_id, COALESCE(season, ''), ep, t, d, updated_at FROM watch_progress WHERE uid = ? ORDER BY updated_at DESC, movie_id DESC`, uid)
 	if err != nil {
 		return nil, err
 	}

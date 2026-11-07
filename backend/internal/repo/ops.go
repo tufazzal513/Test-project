@@ -501,7 +501,7 @@ func (r *Repo) WorkerByKey(ctx context.Context, key string) (*Worker, error) {
 }
 
 func (r *Repo) ListWorkers(ctx context.Context) ([]Worker, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT `+workerCols+` FROM workers ORDER BY created_at, id`)
+	rows, err := r.db.QueryContext(ctx, `SELECT `+workerCols+` FROM workers ORDER BY created_at, rowid`)
 	if err != nil {
 		return nil, err
 	}
