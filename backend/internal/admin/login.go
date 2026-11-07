@@ -51,7 +51,7 @@ func (a *Admin) loginPage(w http.ResponseWriter, r *http.Request) {
 // addresses have Firebase accounts or which of them are admins.
 func (a *Admin) loginSubmit(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, loginBodyLimit)
-	if !sameOrigin(r) {
+	if !sameOrigin(r, a.deps.Cfg.TrustProxy) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -122,7 +122,7 @@ func (a *Admin) loginSubmit(w http.ResponseWriter, r *http.Request) {
 
 // POST /admin/logout deletes the server-side session, so a copied cookie stops working too.
 func (a *Admin) logout(w http.ResponseWriter, r *http.Request) {
-	if !sameOrigin(r) {
+	if !sameOrigin(r, a.deps.Cfg.TrustProxy) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
