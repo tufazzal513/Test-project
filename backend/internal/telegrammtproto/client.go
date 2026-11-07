@@ -39,6 +39,26 @@ type Config struct {
 
 type Client struct{ cfg Config }
 
+// sessionStorage adapts the backup file store to gotd's context-aware session
+// storage interface while keeping the backup login flow independent of gotd.
+type sessionStorage struct {
+	store backup.SessionFileStore
+}
+
+func (s sessionStorage) LoadSession(ctx context.Context) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.store.LoadSession()
+}
+
+func (s sessionStorage) StoreSession(ctx context.Context, data []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.store.StoreSession(data)
+}
+
 func New(cfg Config) (*Client, error) {
 	cfg.ChatID = strings.TrimSpace(cfg.ChatID)
 	if cfg.APIID <= 0 || strings.TrimSpace(cfg.APIHash) == "" {
@@ -55,7 +75,7 @@ func New(cfg Config) (*Client, error) {
 
 func (c *Client) newClient() *telegram.Client {
 	return telegram.NewClient(c.cfg.APIID, c.cfg.APIHash, telegram.Options{
-		SessionStorage: backup.SessionFileStore{Path: c.cfg.SessionPath},
+		SessionStorage: sessionStorage{store: backup.SessionFileStore{Path: c.cfg.SessionPath}},
 		NoUpdates:      true,
 	})
 }
