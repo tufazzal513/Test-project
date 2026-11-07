@@ -1029,3 +1029,10 @@ Not yet verified:
 
 Next:
 - Upload this updated source ZIP to the GitHub repository, run the workflow, download its artifact, and verify Botkeep's runtime contract before configuring production environment variables and persistent storage.
+
+
+## Part 35: First-boot Telegram session handling
+- Fixed first-run startup: when Telegram backup is configured but no authorized `data/telegram.session` exists yet, skip automatic remote restore discovery and continue to database migration/server startup.
+- Existing authorized sessions still use the guarded empty-database Telegram restore path. Unexpected session filesystem errors remain fatal.
+- Admin must complete Telegram phone/code/2FA login from the admin panel; the login flow persists the session for later backup/restore operations.
+- Validation: source inspection and formatting checked; run the GitHub Actions production test/build workflow after pushing. Live Telegram login and Botkeep startup remain deployment checks.
