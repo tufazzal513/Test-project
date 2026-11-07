@@ -338,7 +338,7 @@ func TestCountActiveUsersSince(t *testing.T) {
 	fakeClock(r, now)
 	mustUser(t, r, "recent")
 	mustUser(t, r, "old")
-	if _, err := r.db.ExecContext(ctx, `UPDATE users SET last_login_at = ? WHERE uid = 'old'`, now.Add(-48*time.Hour).UnixMilli()); err != nil {
+	if _, err := r.db.ExecContext(ctx, `UPDATE users SET last_login_at = ?, last_seen = ? WHERE uid = 'old'`, now.Add(-48*time.Hour).UnixMilli(), now.Add(-48*time.Hour).UnixMilli()); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := r.CountActiveUsersSince(ctx, now.Add(-24*time.Hour)); err != nil || got != 1 {

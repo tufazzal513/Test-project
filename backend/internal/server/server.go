@@ -155,8 +155,15 @@ func (s *Server) AdminAPI(pattern string, fn func(http.ResponseWriter, *http.Req
 
 func (s *Server) routes() {
 	s.Public("GET /api/v1/health", s.health)
-	if s.deps.Repo != nil {
+	// Worker notification authentication does not require a local repository,
+	// so keep the route available even before a syncer is attached.
+	if s.deps.Cfg.IsWorker() {
 		s.replicationRoutes()
+	}
+	if s.deps.Repo != nil {
+		if s.deps.Cfg.IsMain() {
+			s.replicationRoutes()
+		}
 		s.catalogRoutes()
 		if s.deps.Cfg.IsMain() { // private data lives on main only; workers proxy these routes (P16)
 			s.privateRoutes()

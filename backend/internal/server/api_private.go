@@ -202,15 +202,20 @@ func (s *Server) getProgress(w http.ResponseWriter, r *http.Request, p *Principa
 	}
 	type dto struct {
 		MovieID string `json:"movieId"`
-		Season  string `json:"season,omitempty"`
-		Ep      *int   `json:"ep,omitempty"`
+		Season  *string `json:"season"`
+		Ep      *int    `json:"ep"`
 		T       int    `json:"t"`
 		D       int    `json:"d"`
 		At      int64  `json:"at"`
 	}
 	out := make([]dto, 0, len(items))
 	for _, it := range items {
-		out = append(out, dto{it.MovieID, it.Season, it.Ep, it.T, it.D, it.At})
+		var season *string
+		if it.Season != "" {
+			value := it.Season
+			season = &value
+		}
+		out = append(out, dto{MovieID: it.MovieID, Season: season, Ep: it.Ep, T: it.T, D: it.D, At: it.At})
 	}
 	writePrivate(w, http.StatusOK, map[string]any{"items": out})
 }
