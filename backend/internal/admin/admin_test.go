@@ -209,7 +209,7 @@ func requireSecurityHeaders(t *testing.T, rr *httptest.ResponseRecorder, what st
 	if strings.Contains(csp, "unsafe-inline") || strings.Contains(csp, "unsafe-eval") {
 		t.Errorf("%s: CSP must not allow unsafe-inline/eval", what)
 	}
-	for k, v := range map[string]string{"Cache-Control": "no-store", "X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer"} {
+	for k, v := range map[string]string{"Cache-Control": "no-store", "X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin"} {
 		if h.Get(k) != v {
 			t.Errorf("%s: %s = %q, want %q", what, k, h.Get(k), v)
 		}

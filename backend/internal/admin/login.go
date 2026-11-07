@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -58,6 +59,7 @@ func (a *Admin) loginSubmit(w http.ResponseWriter, r *http.Request) {
 			"id", httpx.RequestID(r),
 			"host", boundedHeader(r.Host),
 			"origin", boundedHeader(r.Header.Get("Origin")),
+			"referer_origin", refererOriginForLog(r.Header.Get("Referer")),
 			"forwarded_host", boundedHeader(r.Header.Get("X-Forwarded-Host")),
 			"sec_fetch_site", boundedHeader(r.Header.Get("Sec-Fetch-Site")),
 			"trust_proxy", a.deps.Cfg.TrustProxy,
@@ -165,6 +167,19 @@ func boundedHeader(value string) string {
 		value = value[:200]
 	}
 	return value
+}
+
+// refererOriginForLog records only the scheme and authority. Paths and query
+// strings may contain private data and must never be copied into diagnostics.
+func refererOriginForLog(value string) string {
+	u, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		if strings.TrimSpace(value) == "" {
+			return "missing"
+		}
+		return "invalid"
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // firebaseSignIn checks the email and password with Firebase (accounts:signInWithPassword).

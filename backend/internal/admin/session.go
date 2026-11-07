@@ -107,34 +107,51 @@ func safeNext(next string) string {
 // When running behind an explicitly trusted reverse proxy, compare Origin with
 // the public host forwarded by that proxy instead of the private upstream Host.
 func sameOrigin(r *http.Request, trustProxy bool) bool {
-	if sfs := r.Header.Get("Sec-Fetch-Site"); sfs != "" && sfs != "same-origin" {
+	// Fetch Metadata is an additional browser signal. If present, only an
+	// explicitly same-origin request may reach an unsafe admin handler.
+	if sfs := strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")); sfs != "" && sfs != "same-origin" {
 		return false
 	}
-	if o := r.Header.Get("Origin"); o != "" {
-		u, err := url.Parse(o)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
-			return false
-		}
-		expectedHost := r.Host
-		if trustProxy {
-			if forwardedHost := r.Header.Get("X-Forwarded-Host"); forwardedHost != "" {
-				// Accept exactly one authority from the trusted proxy. Never use
-				// a comma-separated client-supplied chain for security decisions.
-				if strings.ContainsAny(forwardedHost, ",\r\n\t /\\") {
-					return false
-				}
-				fh, err := url.Parse("//" + forwardedHost)
-				if err != nil || fh.Host == "" || fh.User != nil || fh.Path != "" {
-					return false
-				}
-				expectedHost = fh.Host
+
+	expectedHost := r.Host
+	if trustProxy {
+		if forwardedHost := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); forwardedHost != "" {
+			// Accept exactly one authority from the trusted proxy. Never use
+			// a comma-separated client-supplied chain for security decisions.
+			if strings.ContainsAny(forwardedHost, ",\r\n\t /\\") {
+				return false
 			}
-		}
-		if !strings.EqualFold(u.Host, expectedHost) {
-			return false
+			fh, err := url.Parse("//" + forwardedHost)
+			if err != nil || fh.Host == "" || fh.User != nil || fh.Path != "" || fh.RawQuery != "" || fh.Fragment != "" {
+				return false
+			}
+			expectedHost = fh.Host
 		}
 	}
-	return true
+
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "null" {
+		// Some embedded/sandboxed browser contexts serialize Origin as "null".
+		// Do not trust that value by itself: require Fetch Metadata and a valid
+		// same-host Referer. The login/session CSRF token remains mandatory too.
+		if r.Header.Get("Sec-Fetch-Site") != "same-origin" {
+			return false
+		}
+		origin = strings.TrimSpace(r.Header.Get("Referer"))
+		if origin == "" {
+			return false
+		}
+	} else if origin == "" {
+		// Older non-browser clients may omit Origin. Admin unsafe requests still
+		// require their session/login CSRF token at the handler layer.
+		return true
+	}
+
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		return false
+	}
+	return strings.EqualFold(u.Host, expectedHost)
 }
 
 func safeMethod(m string) bool {
@@ -214,7 +231,7 @@ func (a *Admin) secure(next http.Handler) http.Handler {
 		h.Set("Content-Security-Policy", csp)
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Referrer-Policy", "same-origin")
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
 		if a.deps.Cfg.CookieSecure {
