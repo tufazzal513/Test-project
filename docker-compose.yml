@@ -1,0 +1,12 @@
+services:
+  converter-bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      WORK_DIR: /data
+    volumes:
+      - ./data:/data
+    mem_limit: 512m
+    cpus: 0.50
+    init: true
