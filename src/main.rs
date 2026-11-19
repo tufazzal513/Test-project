@@ -51,6 +51,7 @@ impl Config {
             timeout_secs: env::var("CONVERSION_TIMEOUT_SECONDS").ok().and_then(|v| v.parse().ok()).unwrap_or(7200),
             min_free_mb: env::var("MIN_FREE_DISK_MB").ok().and_then(|v| v.parse().ok()).unwrap_or(512),
             max_upload_mb: env::var("MAX_UPLOAD_MB").ok().and_then(|v| v.parse().ok()).unwrap_or(1900),
+            allowed_users,
         })
     }
     fn api(&self, method: &str) -> String { format!("{}/bot{}/{}", self.api_base, self.token, method) }
