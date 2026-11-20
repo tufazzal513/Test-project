@@ -26,7 +26,7 @@ Artifact ZIP extract করে নিচের ফাইলগুলো BotKeep-
 - `TELEGRAM_API_ID`: my.telegram.org থেকে পাওয়া API ID
 - `TELEGRAM_API_HASH`: my.telegram.org থেকে পাওয়া API Hash
 
-অন্য path ও size settings আপাতত যেমন আছে তেমন রাখো। API Hash বা Bot Token কাউকে পাঠাবে না।
+অন্য path settings আপাতত যেমন আছে তেমন রাখো। 1 GB disk-এ `MAX_INPUT_BYTES` ও `MAX_OUTPUT_BYTES` 209715200 (200 MiB) রাখো। পুরোনো `MAX_UPLOAD_MB` variable এই Source Code ব্যবহার করে না। API Hash বা Bot Token কাউকে পাঠাবে না।
 
 ## ৪. Startup
 

@@ -256,9 +256,18 @@ async fn cleanup_cached_file(config: &DownloadConfig, telegram_path: &str) -> An
     let canonical_token_dir = fs::canonicalize(token_dir)
         .await
         .context("Cannot resolve this bot's Local Bot API cache directory")?;
+    // Local Bot API versions may place media under nested folders such as
+    // <data>/<bot-token>/documents/file_123.mp4. Permit only regular file_*
+    // media files whose canonical path remains inside this bot's token cache.
+    // Canonicalization prevents symlink/path traversal from escaping the cache.
+    let is_media_cache_file = source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("file_"));
     if !canonical_token_dir.starts_with(root)
-        || source.parent() != Some(canonical_token_dir.as_path())
-        || !source.starts_with(root)
+        || !source.starts_with(&canonical_token_dir)
+        || source == canonical_token_dir
+        || !is_media_cache_file
         || !fs::metadata(&source).await?.is_file()
     {
         return Err(anyhow!("Refusing to delete a file outside this bot's Local Bot API cache"));
