@@ -15,6 +15,12 @@ struct Config {
     min_free_mb: u64,
     max_upload_mb: u64,
     allowed_users: Vec<i64>,
+    api_id: Option<String>,
+    api_hash: Option<String>,
+    local_api_enabled: bool,
+    local_api_bin: PathBuf,
+    local_api_port: u16,
+    local_api_dir: PathBuf,
 }
 
 #[derive(Deserialize)]
@@ -44,14 +50,33 @@ impl Config {
     fn load() -> Result<Self> {
         let token = env::var("BOT_TOKEN").context("BOT_TOKEN is required")?;
         let allowed_users = env::var("ALLOWED_USER_IDS").unwrap_or_default().split(',').filter_map(|s| s.trim().parse().ok()).collect();
+        let local_api_enabled = env::var("LOCAL_BOT_API_ENABLED").unwrap_or_else(|_| "false".into()).eq_ignore_ascii_case("true");
+        let api_id = env::var("API_ID").ok().filter(|v| !v.trim().is_empty());
+        let api_hash = env::var("API_HASH").ok().filter(|v| !v.trim().is_empty());
+        if local_api_enabled && (api_id.is_none() || api_hash.is_none()) {
+            bail!("LOCAL_BOT_API_ENABLED=true requires both API_ID and API_HASH");
+        }
+        let local_api_port = env::var("LOCAL_BOT_API_PORT").ok().and_then(|v| v.parse().ok()).unwrap_or(8081);
+        let local_api_dir = PathBuf::from(env::var("LOCAL_BOT_API_DIR").unwrap_or_else(|_| "./data/local-bot-api".into()));
+        let api_base = if local_api_enabled {
+            format!("http://127.0.0.1:{local_api_port}")
+        } else {
+            env::var("BOT_API_BASE").unwrap_or_else(|_| "https://api.telegram.org".into()).trim_end_matches('/').to_string()
+        };
         Ok(Self {
             token,
-            api_base: env::var("BOT_API_BASE").unwrap_or_else(|_| "https://api.telegram.org".into()).trim_end_matches('/').to_string(),
+            api_base,
             work_dir: PathBuf::from(env::var("WORK_DIR").unwrap_or_else(|_| "./data".into())),
             timeout_secs: env::var("CONVERSION_TIMEOUT_SECONDS").ok().and_then(|v| v.parse().ok()).unwrap_or(7200),
             min_free_mb: env::var("MIN_FREE_DISK_MB").ok().and_then(|v| v.parse().ok()).unwrap_or(512),
             max_upload_mb: env::var("MAX_UPLOAD_MB").ok().and_then(|v| v.parse().ok()).unwrap_or(1900),
             allowed_users,
+            api_id,
+            api_hash,
+            local_api_enabled,
+            local_api_bin: PathBuf::from(env::var("LOCAL_BOT_API_BIN").unwrap_or_else(|_| "./telegram-bot-api".into())),
+            local_api_port,
+            local_api_dir,
         })
     }
     fn api(&self, method: &str) -> String { format!("{}/bot{}/{}", self.api_base, self.token, method) }
@@ -64,6 +89,24 @@ async fn main() -> Result<()> {
     let cfg = Config::load()?;
     fs::create_dir_all(&cfg.work_dir).await?;
     for d in ["jobs", "logs"] { fs::create_dir_all(cfg.work_dir.join(d)).await?; }
+    // Keep the Local Bot API Server in the same Pterodactyl container/process space.
+    // The executable must be uploaded alongside this bot binary when enabled.
+    let _local_api_child = if cfg.local_api_enabled {
+        fs::create_dir_all(cfg.local_api_dir.join("temp")).await?;
+        let child = Command::new(&cfg.local_api_bin)
+            .arg(format!("--api-id={}", cfg.api_id.as_deref().unwrap()))
+            .arg(format!("--api-hash={}", cfg.api_hash.as_deref().unwrap()))
+            .arg("--local")
+            .arg(format!("--http-port={}", cfg.local_api_port))
+            .arg("--http-ip-address=127.0.0.1")
+            .arg(format!("--dir={}", cfg.local_api_dir.display()))
+            .arg(format!("--temp-dir={}", cfg.local_api_dir.join("temp").display()))
+            .stdout(Stdio::inherit()).stderr(Stdio::inherit())
+            .spawn().context("Could not start Local Bot API Server. Upload its executable as LOCAL_BOT_API_BIN and ensure it is executable")?;
+        sleep(Duration::from_secs(2)).await;
+        info!(port=cfg.local_api_port, "Local Bot API Server process started");
+        Some(child)
+    } else { None };
     let client = Client::builder().timeout(Duration::from_secs(300)).build()?;
     recover_old_jobs(&cfg.work_dir).await?;
     let mut offset = 0_i64;

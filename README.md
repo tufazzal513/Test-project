@@ -11,6 +11,17 @@ A standalone Telegram bot written in Rust. It receives a video, downloads it to 
 - A 512 MB RAM / 50% CPU container can still be too small for very large or complex inputs. Free disk space, processing time, and the hosting provider's limits apply.
 - The bot processes one job at a time. Files are streamed to/from disk; upload uses a streaming multipart body, not a whole-file RAM buffer.
 
+## Same-server Local Bot API setup
+
+1. Obtain `api_id` and `api_hash` from https://my.telegram.org/apps. Keep both secret.
+2. Obtain/build the official Telegram `telegram-bot-api` server executable for the server's Linux architecture and upload it beside `rust-video-converter-bot` as `telegram-bot-api`.
+3. Make it executable (`chmod +x telegram-bot-api`).
+4. Set `LOCAL_BOT_API_ENABLED=true`, `API_ID`, and `API_HASH` in the hosting Environment settings. Keep `BOT_TOKEN` as a separate variable.
+5. Keep the startup command loading `.env` if you store settings in a file; for Pterodactyl environment variables, no `.env` load is needed. Start the Rust bot. It launches the Local Bot API Server itself and points its API requests to `http://127.0.0.1:8081`.
+6. Do not set `BOT_API_BASE` to the official API while local mode is enabled; local mode overrides it.
+
+**Resource warning:** Running both services in a 512 MB RAM / 1 GB disk container may fail or be terminated by the host, especially during large transfers/conversion. The bot cannot remove hosting limits. Leave enough disk for both the Local Bot API download and the converter's working copy/output. If the Local Bot API returns a file path that is not accessible to the bot process, both processes must share the same filesystem path.
+
 ## Requirements
 
 - Rust stable (only if building manually)
@@ -23,7 +34,7 @@ A standalone Telegram bot written in Rust. It receives a video, downloads it to 
 1. Create a Telegram bot with `@BotFather` and copy its token.
 2. Copy `.env.example` to `.env` and set `BOT_TOKEN`.
 3. For the hosted Telegram API, leave `BOT_API_BASE=https://api.telegram.org` and set `MAX_UPLOAD_MB=45`. Note: hosted Bot API download limit is lower, so large incoming files will not work.
-4. For larger files, configure a Local Bot API Server and set `BOT_API_BASE` to its API endpoint. Set `MAX_UPLOAD_MB` to a value no greater than that server's supported limit.
+4. For larger files, you can run the Local Bot API Server in the same container as a child process. Upload the official `telegram-bot-api` executable beside the Rust bot binary, set `LOCAL_BOT_API_ENABLED=true`, `API_ID`, and `API_HASH`. The bot starts it on `127.0.0.1:LOCAL_BOT_API_PORT` and automatically uses that endpoint. Set `MAX_UPLOAD_MB` to a value no greater than the Local Bot API Server's supported limit. This requires the Local Bot API executable for the same Linux architecture; the Rust GitHub Actions artifact does not include it.
 5. Start: `docker compose up -d --build`
 6. Send `/start` to your bot, then send a video as a Telegram document or video.
 
@@ -56,6 +67,12 @@ Push this project to a GitHub repository. The workflow at `.github/workflows/bui
 | `MIN_FREE_DISK_MB` | `512` | Minimum free disk space required before processing |
 | `MAX_UPLOAD_MB` | `45` | Application size guard; does not override Telegram's own limits |
 | `RUST_LOG` | `info` | Log verbosity |
+| `LOCAL_BOT_API_ENABLED` | `false` | Start Local Bot API Server as a child process |
+| `API_ID` | empty | Telegram API ID from my.telegram.org, required when local server enabled |
+| `API_HASH` | empty | Telegram API hash from my.telegram.org, required when local server enabled |
+| `LOCAL_BOT_API_BIN` | `./telegram-bot-api` | Path to Local Bot API Server executable |
+| `LOCAL_BOT_API_PORT` | `8081` | Local HTTP API port, bound to loopback only |
+| `LOCAL_BOT_API_DIR` | `./data/local-bot-api` | Local Bot API file storage directory |
 
 ## Safety and cleanup behavior
 
