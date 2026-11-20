@@ -1,0 +1,46 @@
+name: Build Telegram Local Bot API (Linux x86_64)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/build-local-api.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-local-api:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git cmake g++ make zlib1g-dev libssl-dev gperf
+      - name: Build TDLib
+        run: |
+          git clone --depth 1 https://github.com/tdlib/td.git
+          cd td && mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX:PATH="$GITHUB_WORKSPACE/td/tdlib" ..
+          cmake --build . --target install -j2
+      - name: Build official Telegram Bot API server
+        run: |
+          git clone --depth 1 https://github.com/tdlib/telegram-bot-api.git
+          cd telegram-bot-api && mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX:PATH="$GITHUB_WORKSPACE/td/tdlib" ..
+          cmake --build . --target install -j2
+      - name: Package executable
+        run: |
+          mkdir -p release
+          find td/tdlib -type f -name telegram-bot-api -exec cp {} release/telegram-bot-api \;
+          test -s release/telegram-bot-api
+          chmod +x release/telegram-bot-api
+          file release/telegram-bot-api
+          tar -czf telegram-bot-api-linux-x86_64.tar.gz -C release telegram-bot-api
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-bot-api-linux-x86_64
+          path: telegram-bot-api-linux-x86_64.tar.gz
+          if-no-files-found: error

@@ -85,3 +85,37 @@ Push this project to a GitHub repository. The workflow at `.github/workflows/bui
 ## Known production hardening still recommended
 
 Before exposing this bot to the public, use `ALLOWED_USER_IDS` or implement a rate/abuse policy, configure disk quotas and monitoring, and test with representative media files. The initial version does not implement a persistent job database, progress percentage, per-user quotas, or cancellation commands. The polling loop is sequential and a process restart loses pending Telegram updates older than Telegram's update retention window.
+
+
+## Build the Local Bot API executable with GitHub Actions
+
+Run **Actions → Build Telegram Local Bot API (Linux x86_64) → Run workflow**.
+After success, download the `telegram-bot-api-linux-x86_64` artifact, extract the
+tar.gz, and upload `telegram-bot-api` into the BotKeep server root beside
+`videoconverterbot`.
+
+The Rust bot starts this executable itself when `LOCAL_BOT_API_ENABLED=true`.
+Do not start a second Local Bot API process in the Pterodactyl startup command.
+After uploading the executable, use:
+
+```sh
+chmod +x ./videoconverterbot ./telegram-bot-api && exec ./videoconverterbot
+```
+
+Set these BotKeep environment variables (in addition to `BOT_TOKEN`):
+
+```env
+LOCAL_BOT_API_ENABLED=true
+API_ID=your_api_id
+API_HASH=your_api_hash
+LOCAL_BOT_API_BIN=./telegram-bot-api
+LOCAL_BOT_API_PORT=8081
+LOCAL_BOT_API_DIR=./data/local-bot-api
+BOT_API_BASE=https://api.telegram.org
+```
+
+When local mode is enabled, the Rust program overrides `BOT_API_BASE` and uses
+`http://127.0.0.1:8081`. The executable must match the host's Linux architecture.
+This workflow builds Linux x86_64. Building the upstream C++ project may take a
+while. Running Local Bot API and FFmpeg together in a 512 MB RAM container may
+exceed available memory. Local Bot API does not make Telegram transfers unlimited.
