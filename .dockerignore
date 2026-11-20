@@ -1,0 +1,16 @@
+# Rust build artifacts
+target/
+
+# VCS / IDE
+.git/
+.github/
+.vscode/
+
+# Local config/secrets
+.env
+deploy/*.env*
+deploy/local-api.enabled
+deploy/local-api.migration.json
+
+# Misc
+*.log

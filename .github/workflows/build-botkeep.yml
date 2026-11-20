@@ -1,0 +1,53 @@
+name: Build BotKeep deployment
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Dockerfile"
+      - "start-botkeep.sh"
+      - ".env.example"
+      - "BOTKEEP_SETUP_BN.md"
+      - ".github/workflows/build-botkeep.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Build static Linux binary
+        run: |
+          set -euo pipefail
+          docker build --tag shitverter-botkeep:build .
+          docker create --name shitverter-export shitverter-botkeep:build
+          mkdir -p package
+          docker cp shitverter-export:/usr/local/bin/converter-bot package/converter-bot
+          docker rm shitverter-export
+          chmod 700 package/converter-bot
+          cp start-botkeep.sh .env.example README.md BOTKEEP_SETUP_BN.md package/
+          chmod 700 package/start-botkeep.sh
+          (
+            cd package
+            zip -r ../shitverter-botkeep.zip .
+            sha256sum ../shitverter-botkeep.zip > ../shitverter-botkeep.zip.sha256
+          )
+
+      - name: Upload BotKeep package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: shitverter-botkeep-linux-x86_64
+          path: |
+            shitverter-botkeep.zip
+            shitverter-botkeep.zip.sha256
+          if-no-files-found: error
+          retention-days: 30

@@ -1,6 +1,8 @@
+/target
 .env
-/data/
-target/
-*.mp4
-*.mkv
-*.log
+.vscode
+/deploy/*.env*
+/deploy/local-api.enabled
+/deploy/local-api.migration.json
+
+__pycache__/

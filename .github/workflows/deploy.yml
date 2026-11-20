@@ -1,0 +1,180 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_only:
+        description: Publish the image without deploying it
+        type: boolean
+        default: false
+      enable_local_api:
+        description: Enable files up to 2 GiB (requires TELEGRAM_API_ID and TELEGRAM_API_HASH secrets)
+        type: boolean
+        default: false
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build immutable images
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_reference: ${{ steps.image.outputs.reference }}
+      telegram_api_reference: ${{ steps.telegram_image.outputs.reference }}
+    steps:
+      - name: Validate deployment options
+        env:
+          PUBLISH_ONLY: ${{ inputs.publish_only }}
+          ENABLE_LOCAL_API: ${{ inputs.enable_local_api }}
+        run: |
+          if [[ "$PUBLISH_ONLY" == true && "$ENABLE_LOCAL_API" == true ]]; then
+            echo '::error::Enable local API requires deployment; leave publish_only unchecked.'
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+
+      - name: Build and publish image
+        id: image
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          image_repository="${IMAGE_REPOSITORY,,}"
+          image_tag="$image_repository:sha-$GITHUB_SHA"
+          printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker buildx build --platform linux/amd64 --provenance=true --sbom=true --push --tag "$image_tag" \
+            --cache-from type=gha,scope=shitverter \
+            --cache-to type=gha,scope=shitverter,mode=max \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" .
+          digest="$(docker buildx imagetools inspect "$image_tag" --format '{{.Manifest.Digest}}')"
+          printf 'reference=%s@%s\n' "$image_repository" "$digest" >> "$GITHUB_OUTPUT"
+
+      # Publish the official local Bot API image before the production approval
+      # so approving a deployment never waits on a cold TDLib compilation.
+      - name: Build and publish official local Bot API image
+        if: ${{ inputs.enable_local_api }}
+        id: telegram_image
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          image_repository="${IMAGE_REPOSITORY,,}"
+          image_tag="$image_repository:telegram-api-sha-$GITHUB_SHA"
+          printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker buildx build --platform linux/amd64 --provenance=true --sbom=true --push --tag "$image_tag" \
+            --cache-from type=gha,scope=telegram-bot-api \
+            --cache-to type=gha,scope=telegram-bot-api,mode=max \
+            --file deploy/telegram-bot-api.Dockerfile \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" deploy
+          digest="$(docker buildx imagetools inspect "$image_tag" --format '{{.Manifest.Digest}}')"
+          printf 'reference=%s@%s\n' "$image_repository" "$digest" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Deploy immutable image
+    if: ${{ inputs.publish_only != true }}
+    needs: build
+    runs-on: ubuntu-24.04
+    # Both images are already published by the build job, so the approved
+    # window only transfers files and restarts the containers.
+    timeout-minutes: 20
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Validate and prepare Telegram application credentials
+        if: ${{ inputs.enable_local_api }}
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          api_id = os.environ["TELEGRAM_API_ID"].strip()
+          api_hash = os.environ["TELEGRAM_API_HASH"].strip()
+          if (not re.fullmatch(r"[1-9][0-9]{0,9}", api_id)
+                  or int(api_id) > 2147483647
+                  or not re.fullmatch(r"[a-fA-F0-9]{32}", api_hash)):
+              raise SystemExit("Set valid TELEGRAM_API_ID and TELEGRAM_API_HASH secrets in the production environment before enabling local API. The running bot has not been changed.")
+          path = Path(os.environ["RUNNER_TEMP"]) / "telegram-api.env"
+          descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+          with os.fdopen(descriptor, "w") as stream:
+              stream.write(f"TELEGRAM_API_ID={api_id}\nTELEGRAM_API_HASH={api_hash}\n")
+          PY
+
+      - name: Configure SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          test -n "$DEPLOY_SSH_PRIVATE_KEY"
+          test -n "$DEPLOY_USER"
+          install -d -m 700 "$RUNNER_TEMP/ssh"
+          printf '%s\n' "$DEPLOY_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/ssh/id_ed25519"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/ssh/id_ed25519"
+          cat > "$RUNNER_TEMP/ssh/config" <<EOF
+          Host production
+            HostName $DEPLOY_HOST
+            User $DEPLOY_USER
+            Port ${DEPLOY_PORT:-22}
+            IdentityFile $RUNNER_TEMP/ssh/id_ed25519
+            UserKnownHostsFile $RUNNER_TEMP/ssh/known_hosts
+            StrictHostKeyChecking yes
+            BatchMode yes
+            ConnectTimeout 15
+            ServerAliveInterval 15
+            ServerAliveCountMax 3
+          EOF
+
+      - name: Install deployment files and restart bot
+        env:
+          IMAGE_REFERENCE: ${{ needs.build.outputs.image_reference }}
+          TELEGRAM_IMAGE_REFERENCE: ${{ needs.build.outputs.telegram_api_reference }}
+          ENABLE_LOCAL_API: ${{ inputs.enable_local_api }}
+        run: |
+          set -euo pipefail
+          ssh -F "$RUNNER_TEMP/ssh/config" production 'umask 077; mkdir -p "$HOME/shitverter"'
+          scp -F "$RUNNER_TEMP/ssh/config" deploy/compose.yml deploy/compose.local-api.yml \
+            deploy/compose.telegram-api.yml deploy/telegram-bot-api.Dockerfile deploy/.dockerignore \
+            deploy/deploy.sh deploy/enable-local-api.py production:shitverter/
+          ssh -F "$RUNNER_TEMP/ssh/config" production 'chmod 700 "$HOME/shitverter/deploy.sh"'
+          if [[ "$ENABLE_LOCAL_API" == true ]]; then
+            ssh -F "$RUNNER_TEMP/ssh/config" production 'set -eu; command -v python3 >/dev/null; umask 077; : > "$HOME/shitverter/telegram-api.env.incoming"; chmod 600 "$HOME/shitverter/telegram-api.env.incoming"'
+            scp -F "$RUNNER_TEMP/ssh/config" "$RUNNER_TEMP/telegram-api.env" production:shitverter/telegram-api.env.incoming
+            ssh -F "$RUNNER_TEMP/ssh/config" production "python3 \"\$HOME/shitverter/enable-local-api.py\" --bot-image '$IMAGE_REFERENCE' --api-image '$TELEGRAM_IMAGE_REFERENCE' --credentials \"\$HOME/shitverter/telegram-api.env.incoming\""
+          else
+            ssh -F "$RUNNER_TEMP/ssh/config" production "\"\$HOME/shitverter/deploy.sh\" '$IMAGE_REFERENCE'"
+          fi
+
+      - name: Remove temporary credentials
+        if: ${{ always() && inputs.enable_local_api }}
+        run: |
+          rm -f "$RUNNER_TEMP/telegram-api.env"
+          if [[ -f "$RUNNER_TEMP/ssh/config" ]]; then
+            ssh -F "$RUNNER_TEMP/ssh/config" production 'rm -f "$HOME/shitverter/telegram-api.env.incoming"' || true
+          fi

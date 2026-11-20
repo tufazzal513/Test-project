@@ -1,8 +1,0 @@
-# Reference configuration only. The current binary reads environment variables.
-# Copy values to .env; never commit real secrets.
-BOT_API_BASE = "https://api.telegram.org"
-WORK_DIR = "./data"
-CONVERSION_TIMEOUT_SECONDS = 7200
-MIN_FREE_DISK_MB = 512
-MAX_UPLOAD_MB = 45
-RUST_LOG = "info"
